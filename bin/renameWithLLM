@@ -1,0 +1,90 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "csv"
+
+class RenameWithLLM
+  class Set < Hash
+    def initialize(file, result)
+      self[:file], self[:result] = file, result
+    end
+
+    def file = self[:file]
+    
+    def result
+      result = self[:result].gsub("\n", "")
+      if not result =~ /\.mp3$/i
+        return "%s.mp3" % result
+      end
+      result
+    end
+    
+    def to_a = [file, result]
+
+    def to_s
+      "%s -> %s" % [file, result]
+    end
+  end
+  
+  DEFAULT_PROMPT = "extrahiere mir aus dem dateinamen nur den vollständigen autor und den titel und gegebenenfalls fortlaufenden index (part1, teil 1, band 1), und dateiendung (!) - alle anderen infos sind unrelevant
+  ausgabe nichts ausser autor und titel 'author - titel - part.mp3'."
+
+  attr_accessor :prompt, :model
+  attr_reader :list, :recorder
+
+  def initialize(list: [], model: "llama-server")
+    @list, @model = list, model
+    @recorder = []
+  end
+
+  def prompt
+    @prompt || DEFAULT_PROMPT
+  end
+  
+  def llm_generate_for(filename)
+    `llm -m #{model} "#{prompt} \n#{filename}" 2> /dev/null`.strip
+  end
+
+  def record(set)
+    @recorder.push(set)
+    set
+  end
+
+  def process
+    @list.sort.each do |file|
+      result = llm_generate_for(file)
+      yield record(Set.new(file, result))
+    end
+  end
+
+  def self.save_record(file, recorder)
+    CSV.open(file, "wb") do |csv|
+      recorder.each do |set|
+        csv << set.to_a
+      end
+    end
+  end
+
+end
+
+
+
+abort "Usage: #{File.basename($0)} <file.mp3 | directory> [model]" if ARGV.empty?
+
+arg = ARGV[0]
+model ||= ARGV[1]
+model ||= "llama-server"
+
+files = Dir.children(arg)
+files.reject! { |f| f =~ /^\./ }
+
+rwllm = RenameWithLLM.new(model: model, list: files)
+
+begin
+  rwllm.process do |set|
+    puts set
+  end
+rescue Interrupt
+ensure
+  RenameWithLLM.save_record(File.join(arg, ".last-result.csv"), rwllm.recorder)
+end
