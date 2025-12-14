@@ -1,0 +1,48 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+# focused window id
+wid=$(xdotool getwindowfocus)
+
+# window position
+eval $(xdotool getwindowgeometry --shell "$wid")
+
+# find output containing the window center
+output=$(xrandr | awk -v x=$((X + WIDTH/2)) -v y=$((Y + HEIGHT/2)) '
+/ connected/ {
+  name=$1
+  if (match($0, /\+([0-9]+)\+([0-9]+)/, a)) {
+    ox=a[1]; oy=a[2]
+  }
+  if (match($0, / ([0-9]+)x([0-9]+)/, b)) {
+    w=b[1]; h=b[2]
+  }
+  if (x>=ox && x<ox+w && y>=oy && y<oy+h) {
+    print name; exit
+  }
+}
+')
+
+[[ -z "$output" ]] && exit 1
+
+current=$(xrandr | awk -v o="$output" '
+$1 == o {
+  for (i=1; i<=NF; i++) {
+    if ($i ~ /\(normal|left|right|inverted/) {
+      gsub(/[()]/,"",$i)
+      print $i
+      exit
+    }
+  }
+}
+')
+
+case "$current" in
+  normal)   next=right ;;
+  right)    next=inverted ;;
+  inverted) next=left ;;
+  left)     next=normal ;;
+  *)        next=normal ;;
+esac
+
+xrandr --output "$output" --rotate "$next"
